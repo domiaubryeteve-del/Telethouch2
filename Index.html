@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>TéléTouch — Gestes</title>
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/control_utils/control_utils.js" crossorigin="anonymous"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&display=swap');
+
+*{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+:root{
+  --bg:#06060f;--a1:#00e5ff;--a2:#b44fff;--a3:#ff6535;
+  --glass:rgba(255,255,255,.06);--bord:rgba(255,255,255,.11);
+  --text:rgba(255,255,255,.93);--dim:rgba(255,255,255,.38)
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);font-family:'Syne',sans-serif}
+
+#bg{
+  position:fixed;inset:0;pointer-events:none;z-index:0;
+  background:
+    radial-gradient(ellipse 60% 50% at 5% 10%,rgba(0,229,255,.09) 0%,transparent 65%),
+    radial-gradient(ellipse 50% 60% at 95% 90%,rgba(180,79,255,.09) 0%,transparent 65%);
+  animation:breathe 7s ease-in-out infinite alternate
+}
+@keyframes breathe{from{opacity:.6}to{opacity:1}}
+
+/* ══ ÉCRAN ACCUEIL ══ */
+#s-home{
+  position:fixed;inset:0;z-index:10;
+  display:flex;flex-direction:column;
+  align-items:center;justify-content:center;
+  gap:22px;padding:28px 20px
+}
+.logo-name{
+  font-size:clamp(2rem,9vw,3rem);font-weight:800;letter-spacing:-1.5px;
+  background:linear-gradient(135deg,var(--a1),var(--a2),var(--a3));
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+  text-align:center
+}
+.logo-sub{font-size:.7rem;letter-spacing:3px;text-transform:uppercase;color:var(--dim);text-align:center}
+
+.glass-card{
+  width:100%;max-width:380px;
+  background:var(--glass);border:1px solid var(--bord);
+  backdrop-filter:blur(22px);border-radius:22px;padding:20px
+}
+.field-lbl{font-size:.62rem;letter-spacing:2px;text-transform:uppercase;color:var(--dim);margin-bottom:8px}
+.ip-input{
+  width:100%;background:rgba(255,255,255,.06);
+  border:1px solid rgba(255,255,255,.12);border-radius:12px;
+  padding:12px 14px;color:var(--text);
+  font-family:'Syne',sans-serif;font-size:1rem;outline:none;
+  transition:border-color .2s
+}
+.ip-input:focus{border-color:var(--a2)}
+.ip-hint{margin-top:7px;font-size:.66rem;color:var(--dim);line-height:1.6}
+
+/* Gestes expliqués */
+.gestures-card{
+  width:100%;max-width:380px;
+  background:var(--glass);border:1px solid var(--bord);
+  backdrop-filter:blur(22px);border-radius:22px;padding:20px;
+  display:flex;flex-direction:column;gap:12px
+}
+.gesture-row{display:flex;align-items:center;gap:14px}
+.g-icon{font-size:2rem;width:44px;text-align:center;flex-shrink:0}
+.g-desc{font-size:.8rem;color:var(--text);line-height:1.5}
+.g-desc strong{color:var(--a1)}
+
+.btn-start{
+  width:100%;max-width:380px;padding:16px;
+  background:linear-gradient(135deg,var(--a1),var(--a2));
+  border:none;border-radius:16px;color:#fff;
+  font-family:'Syne',sans-serif;font-size:1rem;font-weight:700;
+  cursor:pointer;letter-spacing:.5px;
+  box-shadow:0 4px 22px rgba(0,229,255,.22);transition:transform .13s
+}
+.btn-start:active{transform:scale(.96)}
+
+/* ══ ÉCRAN CAMÉRA ══ */
+#s-camera{
+  position:fixed;inset:0;z-index:10;
+  display:none;flex-direction:column
+}
+
+/* Vidéo en fond — miroir horizontal */
+#video{
+  position:absolute;inset:0;width:100%;height:100%;
+  object-fit:cover;
+  transform:scaleX(-1); /* miroir = plus naturel */
+  opacity:.35;
+  z-index:0
+}
+
+/* Canvas de dessin des landmarks */
+#canvas{
+  position:absolute;inset:0;width:100%;height:100%;
+  transform:scaleX(-1);
+  z-index:1;pointer-events:none
+}
+
+/* ── CURSEUR ── */
+#cursor{
+  position:fixed;z-index:9999;pointer-events:none;
+  transform:translate(-50%,-50%);
+  transition:left .04s linear, top .04s linear;
+}
+#cursor .co{
+  width:36px;height:36px;border-radius:50%;
+  border:2.5px solid var(--a1);
+  background:rgba(0,229,255,.18);
+  box-shadow:0 0 20px rgba(0,229,255,.5);
+  transition:all .1s
+}
+#cursor .ci{
+  position:absolute;width:9px;height:9px;
+  background:var(--a1);border-radius:50%;
+  top:50%;left:50%;transform:translate(-50%,-50%);
+  box-shadow:0 0 12px rgba(0,229,255,.9)
+}
+#cursor.pinching .co{
+  transform:scale(.55);
+  background:rgba(0,229,255,.6);
+  box-shadow:0 0 30px rgba(0,229,255,.8)
+}
+#cursor.pinching .ci{background:#fff}
+
+/* Ripple clic */
+.ripple{
+  position:fixed;width:70px;height:70px;border-radius:50%;
+  background:rgba(0,229,255,.25);
+  transform:translate(-50%,-50%) scale(0);
+  pointer-events:none;z-index:9998;
+  animation:rip .5s ease-out forwards
+}
+@keyframes rip{to{transform:translate(-50%,-50%) scale(4);opacity:0}}
+
+/* ── HUD (infos en haut) ── */
+#hud{
+  position:absolute;top:0;left:0;right:0;
+  height:56px;z-index:100;
+  background:rgba(6,6,20,.75);backdrop-filter:blur(16px);
+  border-bottom:1px solid var(--bord);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:0 16px
+}
+.hud-brand{font-weight:700;font-size:.9rem;display:flex;align-items:center;gap:8px}
+.hud-right{display:flex;align-items:center;gap:12px}
+
+/* Indicateur main détectée */
+#hand-indicator{
+  display:flex;align-items:center;gap:6px;
+  font-size:.72rem;color:var(--dim);
+  transition:color .3s
+}
+#hand-indicator.detected{color:var(--a1)}
+#hand-indicator .hd{
+  width:8px;height:8px;border-radius:50%;
+  background:#666;transition:background .3s,box-shadow .3s
+}
+#hand-indicator.detected .hd{background:var(--a1);box-shadow:0 0 8px rgba(0,229,255,.6)}
+
+/* Indicateur pince */
+#pinch-indicator{
+  display:flex;align-items:center;gap:6px;
+  font-size:.72rem;color:var(--dim);
+  transition:color .3s
+}
+#pinch-indicator.active{color:#ff6535}
+#pinch-indicator .pd{
+  width:8px;height:8px;border-radius:50%;
+  background:#666;transition:background .3s,box-shadow .3s
+}
+#pinch-indicator.active .pd{background:#ff6535;box-shadow:0 0 8px rgba(255,101,53,.7)}
+
+.sm-btn{
+  padding:7px 13px;background:var(--glass);border:1px solid var(--bord);
+  border-radius:10px;color:var(--dim);font-family:'Syne',sans-serif;font-size:.72rem;cursor:pointer
+}
+
+/* ── NOTIFICATION ── */
+#notif{
+  position:fixed;top:70px;left:50%;
+  transform:translateX(-50%) translateY(-8px);
+  background:rgba(6,6,20,.85);backdrop-filter:blur(12px);
+  border:1px solid var(--bord);border-radius:14px;
+  padding:9px 20px;font-size:.78rem;color:var(--text);
+  opacity:0;transition:opacity .2s,transform .2s;
+  z-index:9000;pointer-events:none;white-space:nowrap
+}
+#notif.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ── GUIDE GESTES (coin bas) ── */
+#gesture-guide{
+  position:fixed;bottom:16px;left:50%;
+  transform:translateX(-50%);
+  background:rgba(6,6,20,.75);backdrop-filter:blur(12px);
+  border:1px solid var(--bord);border-radius:16px;
+  padding:10px 20px;
+  display:flex;gap:24px;align-items:center;
+  z-index:9000;font-size:.7rem;color:var(--dim)
+}
+.gg-item{display:flex;align-items:center;gap:6px}
+.gg-icon{font-size:1.1rem}
+
+/* Connexion status badge */
+#conn-badge{
+  position:fixed;bottom:70px;left:50%;
+  transform:translateX(-50%);
+  background:rgba(6,6,20,.8);backdrop-filter:blur(10px);
+  border:1px solid var(--bord);border-radius:20px;
+  padding:6px 16px;font-size:.7rem;
+  display:flex;align-items:center;gap:8px;
+  z-index:9000;color:var(--dim)
+}
+.sdot{
+  width:8px;height:8px;border-radius:50%;
+  background:#ff4444;box-shadow:0 0 6px rgba(255,68,68,.5);
+  transition:background .3s;display:inline-block;
+  animation:blink 1.4s infinite
+}
+.sdot.on{background:#00ff88;box-shadow:0 0 7px rgba(0,255,136,.5);animation:none}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+
+#toast{
+  position:fixed;bottom:22px;left:50%;
+  transform:translateX(-50%) translateY(14px);
+  background:rgba(6,6,20,.88);backdrop-filter:blur(14px);
+  border:1px solid var(--bord);border-radius:22px;
+  padding:10px 22px;font-size:.76rem;color:var(--text);
+  opacity:0;transition:opacity .25s,transform .25s;
+  z-index:9999;pointer-events:none;white-space:nowrap
+}
+#toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+</style>
+</head>
+<body>
+<div id="bg"></div>
+
+<!-- ══════════════════════════════
+     ÉCRAN ACCUEIL
+══════════════════════════════ -->
+<div id="s-home">
+  <div>
+    <div class="logo-name">TéléTouch</div>
+    <div class="logo-sub">Contrôle par gestes · Sans toucher</div>
+  </div>
+
+  <!-- IP de la télé -->
+  <div class="glass-card">
+    <div class="field-lbl">Code de la télé (optionnel)</div>
+    <input class="ip-input" id="code-input" type="text"
+      placeholder="Laisse vide = mode solo" autocomplete="off"
+      oninput="this.value=this.value.toLowerCase()">
+    <div class="ip-hint">
+      📺 Si tu as <code>teletouch.html</code> ouvert sur la télé → entre le code<br>
+      Sinon laisse vide → le curseur contrôle cette page
+    </div>
+  </div>
+
+  <!-- Explication des gestes -->
+  <div class="gestures-card">
+    <div class="gesture-row">
+      <div class="g-icon">☝️</div>
+      <div class="g-desc"><strong>Index pointé</strong><br>Déplace le curseur sur la télé</div>
+    </div>
+    <div class="gesture-row">
+      <div class="g-icon">🤌</div>
+      <div class="g-desc"><strong>Pince (pouce + index)</strong><br>Clic gauche</div>
+    </div>
+    <div class="gesture-row">
+      <div class="g-icon">✋</div>
+      <div class="g-desc"><strong>Main ouverte</strong><br>Pause — curseur ne bouge pas</div>
+    </div>
+  </div>
+
+  <button class="btn-start" onclick="demarrer()">
+    📷 Démarrer la caméra
+  </button>
+</div>
+
+<!-- ══════════════════════════════
+     ÉCRAN CAMÉRA
+══════════════════════════════ -->
+<div id="s-camera">
+  <video id="video" playsinline></video>
+  <canvas id="canvas"></canvas>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="hud-brand">
+      ✋ TéléTouch Gestes
+    </div>
+    <div class="hud-right">
+      <div id="hand-indicator">
+        <div class="hd"></div>
+        Main
+      </div>
+      <div id="pinch-indicator">
+        <div class="pd"></div>
+        Pince
+      </div>
+      <button class="sm-btn" onclick="arreter()">⏻ Stop</button>
+    </div>
+  </div>
+
+  <!-- Guide bas -->
+  <div id="gesture-guide">
+    <div class="gg-item"><span class="gg-icon">☝️</span> Pointer = déplacer</div>
+    <div class="gg-item"><span class="gg-icon">🤌</span> Pincer = cliquer</div>
+    <div class="gg-item"><span class="gg-icon">✋</span> Main ouverte = pause</div>
+  </div>
+
+  <!-- Connexion -->
+  <div id="conn-badge">
+    <span class="sdot" id="conn-dot"></span>
+    <span id="conn-txt">Mode solo</span>
+  </div>
+</div>
+
+<!-- Curseur flottant -->
+<div id="cursor" style="display:none">
+  <div class="co"></div>
+  <div class="ci"></div>
+</div>
+
+<!-- Notif + Toast -->
+<div id="notif"></div>
+<div id="toast"></div>
+
+<script>
+// ══════════════════════════════════════════
+//  CONFIG
+// ══════════════════════════════════════════
+const RELAY      = 'wss://socketsbay.com/wss/v2/1/';
+const PINCH_DIST = 0.07;   // distance pouce-index pour déclencher le pince
+const SMOOTH     = 0.25;   // lissage du curseur (0=pas de lissage, 1=figé)
+const PAUSE_FINGERS = 4;   // nb de doigts levés = pause
+
+// ══════════════════════════════════════════
+//  ÉTAT
+// ══════════════════════════════════════════
+let ws = null;
+let hands = null;
+let camera = null;
+let curX = window.innerWidth  / 2;
+let curY = window.innerHeight / 2;
+let targetX = curX, targetY = curY;
+let isPinching    = false;
+let pinchCooldown = 0;
+let frameCount    = 0;
+let handVisible   = false;
+
+const videoEl  = document.getElementById('video');
+const canvasEl = document.getElementById('canvas');
+const ctx      = canvasEl.getContext('2d');
+const cursorEl = document.getElementById('cursor');
+
+// ══════════════════════════════════════════
+//  NAVIGATION
+// ══════════════════════════════════════════
+function demarrer() {
+  const code = document.getElementById('code-input').value.trim();
+  document.getElementById('s-home').style.display   = 'none';
+  document.getElementById('s-camera').style.display = 'flex';
+  cursorEl.style.display = 'block';
+
+  if (code) connecterWS(code);
+  else {
+    document.getElementById('conn-txt').textContent = 'Mode solo (cette page)';
+  }
+
+  initMediaPipe();
+}
+
+function arreter() {
+  if (camera)  { camera.stop(); camera = null; }
+  if (hands)   { hands.close(); hands = null; }
+  if (ws)      { ws.close(); ws = null; }
+  cursorEl.style.display = 'none';
+  document.getElementById('s-camera').style.display = 'none';
+  document.getElementById('s-home').style.display   = 'flex';
+}
+
+// ══════════════════════════════════════════
+//  WEBSOCKET (pour envoyer à la télé)
+// ══════════════════════════════════════════
+function connecterWS(code) {
+  ws = new WebSocket(RELAY + code + '/');
+  ws.onopen = () => {
+    ws.send(JSON.stringify({type:'hello',_from:'pad'}));
+    document.getElementById('conn-dot').classList.add('on');
+    document.getElementById('conn-txt').textContent = 'Télé connectée ✓';
+    toast('Connecté à la télé ✓');
+  };
+  ws.onerror = () => toast('Erreur réseau');
+  ws.onclose = () => {
+    document.getElementById('conn-dot').classList.remove('on');
+    document.getElementById('conn-txt').textContent = 'Déconnecté';
+  };
+}
+
+function envoyer(data) {
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({...data, _from:'pad'}));
+  }
+}
+
+// ══════════════════════════════════════════
+//  MEDIAPIPE HANDS
+// ══════════════════════════════════════════
+function initMediaPipe() {
+  hands = new Hands({
+    locateFile: (file) =>
+      `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 1,
+    minDetectionConfidence: 0.7,
+    minTrackingConfidence: 0.6
+  });
+
+  hands.onResults(onResults);
+
+  camera = new Camera(videoEl, {
+    onFrame: async () => {
+      await hands.send({ image: videoEl });
+    },
+    width: 640,
+    height: 480,
+    facingMode: 'user'  // caméra frontale
+  });
+
+  camera.start().catch(err => {
+    toast('Caméra refusée — autorise l\'accès');
+    arreter();
+  });
+
+  // Loop de rendu curseur lissé
+  requestAnimationFrame(renderLoop);
+}
+
+// ══════════════════════════════════════════
+//  TRAITEMENT DES RÉSULTATS MEDIAPIPE
+// ══════════════════════════════════════════
+function onResults(results) {
+  frameCount++;
+
+  // Redimensionner canvas
+  canvasEl.width  = videoEl.videoWidth  || 640;
+  canvasEl.height = videoEl.videoHeight || 480;
+
+  ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    // Pas de main détectée
+    setHandVisible(false);
+    return;
+  }
+
+  setHandVisible(true);
+  const landmarks = results.multiHandLandmarks[0];
+
+  // Dessiner les landmarks
+  drawHand(landmarks);
+
+  // Points clés
+  const indexTip = landmarks[8];   // bout de l'index
+  const thumbTip = landmarks[4];   // bout du pouce
+  const middleTip= landmarks[12];  // bout du majeur
+  const ringTip  = landmarks[16];  // bout de l'annulaire
+  const pinkyTip = landmarks[20];  // bout de l'auriculaire
+
+  // Compter les doigts levés (au-dessus de leur MCP)
+  const fingers = countFingers(landmarks);
+
+  // ── MAIN OUVERTE (≥4 doigts) = PAUSE ──
+  if (fingers >= 4) {
+    // Ne pas bouger le curseur
+    return;
+  }
+
+  // ── DOIGT POINTÉ : index levé, autres baissés ──
+  // Le curseur suit le bout de l'index
+  // Les coords MediaPipe sont 0..1, on mappe sur l'écran
+  // Note : vidéo miroir → x est déjà inversé
+  const rawX = (1 - indexTip.x) * window.innerWidth;
+  const rawY = indexTip.y * window.innerHeight;
+
+  targetX = rawX;
+  targetY = rawY;
+
+  // ── PINCE : distance pouce-index ──
+  const dist = Math.hypot(
+    thumbTip.x - indexTip.x,
+    thumbTip.y - indexTip.y
+  );
+
+  const nowPinching = dist < PINCH_DIST;
+  const now = Date.now();
+
+  if (nowPinching && !isPinching && now > pinchCooldown) {
+    // Début pince = CLIC
+    isPinching    = true;
+    pinchCooldown = now + 600; // anti-rebond 600ms
+    declencherClic();
+  } else if (!nowPinching && isPinching) {
+    isPinching = false;
+  }
+
+  // Mettre à jour l'indicateur pince
+  document.getElementById('pinch-indicator').classList.toggle('active', nowPinching);
+  cursorEl.classList.toggle('pinching', nowPinching);
+
+  // Envoyer mouvement à la télé (toutes les 2 frames pour économiser)
+  if (frameCount % 2 === 0 && ws) {
+    const dx = targetX - curX;
+    const dy = targetY - curY;
+    envoyer({ type:'move', dx, dy });
+  }
+}
+
+// Compte les doigts levés
+function countFingers(lm) {
+  let count = 0;
+  // Index, Majeur, Annulaire, Auriculaire : tip vs pip
+  const tips = [8, 12, 16, 20];
+  const pips = [6, 10, 14, 18];
+  for (let i = 0; i < 4; i++) {
+    if (lm[tips[i]].y < lm[pips[i]].y) count++;
+  }
+  return count;
+}
+
+// ══════════════════════════════════════════
+//  CLIC
+// ══════════════════════════════════════════
+function declencherClic() {
+  // Ripple visuel
+  const r = document.createElement('div');
+  r.className = 'ripple';
+  r.style.left = curX + 'px';
+  r.style.top  = curY + 'px';
+  document.body.appendChild(r);
+  setTimeout(() => r.remove(), 500);
+
+  // Si mode solo : cliquer l'élément sous le curseur
+  if (!ws) {
+    cursorEl.style.display = 'none';
+    const el = document.elementFromPoint(curX, curY);
+    cursorEl.style.display = 'block';
+    if (el) el.dispatchEvent(new MouseEvent('click', { bubbles:true, clientX:curX, clientY:curY }));
+  } else {
+    envoyer({ type:'click', button:'left' });
+  }
+
+  notif('🤌 Clic !');
+}
+
+// ══════════════════════════════════════════
+//  BOUCLE DE RENDU (lissage curseur)
+// ══════════════════════════════════════════
+function renderLoop() {
+  // Lissage exponentiel
+  curX += (targetX - curX) * (1 - SMOOTH);
+  curY += (targetY - curY) * (1 - SMOOTH);
+
+  cursorEl.style.left = curX + 'px';
+  cursorEl.style.top  = curY + 'px';
+
+  requestAnimationFrame(renderLoop);
+}
+
+// ══════════════════════════════════════════
+//  DESSIN DE LA MAIN SUR LE CANVAS
+// ══════════════════════════════════════════
+function drawHand(landmarks) {
+  const W = canvasEl.width;
+  const H = canvasEl.height;
+
+  // Connexions entre les landmarks (squelette de la main)
+  const connections = [
+    [0,1],[1,2],[2,3],[3,4],         // pouce
+    [0,5],[5,6],[6,7],[7,8],         // index
+    [0,9],[9,10],[10,11],[11,12],    // majeur
+    [0,13],[13,14],[14,15],[15,16],  // annulaire
+    [0,17],[17,18],[18,19],[19,20],  // auriculaire
+    [5,9],[9,13],[13,17]             // paume
+  ];
+
+  ctx.strokeStyle = 'rgba(0,229,255,0.5)';
+  ctx.lineWidth   = 2;
+
+  connections.forEach(([a,b]) => {
+    ctx.beginPath();
+    ctx.moveTo(landmarks[a].x * W, landmarks[a].y * H);
+    ctx.lineTo(landmarks[b].x * W, landmarks[b].y * H);
+    ctx.stroke();
+  });
+
+  // Points
+  landmarks.forEach((lm, i) => {
+    const x = lm.x * W;
+    const y = lm.y * H;
+    ctx.beginPath();
+    ctx.arc(x, y, i === 8 || i === 4 ? 7 : 4, 0, Math.PI * 2);
+    ctx.fillStyle = i === 8 ? '#00e5ff'
+                 : i === 4 ? '#ff6535'
+                 : 'rgba(255,255,255,0.6)';
+    ctx.fill();
+  });
+}
+
+// ══════════════════════════════════════════
+//  UI HELPERS
+// ══════════════════════════════════════════
+function setHandVisible(v) {
+  handVisible = v;
+  document.getElementById('hand-indicator').classList.toggle('detected', v);
+  if (!v) {
+    document.getElementById('pinch-indicator').classList.remove('active');
+    cursorEl.classList.remove('pinching');
+  }
+}
+
+function notif(msg) {
+  const el = document.getElementById('notif');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), 900);
+}
+
+function toast(msg, dur = 1800) {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.classList.add('show');
+  clearTimeout(el._t); el._t = setTimeout(() => el.classList.remove('show'), dur);
+}
+</script>
+</body>
+</html>
